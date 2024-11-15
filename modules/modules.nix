@@ -205,6 +205,7 @@ let
     ./programs/qutebrowser.nix
     ./programs/ranger.nix
     ./programs/rbw.nix
+    ./programs/rclone.nix
     ./programs/readline.nix
     ./programs/rio.nix
     ./programs/ripgrep.nix
