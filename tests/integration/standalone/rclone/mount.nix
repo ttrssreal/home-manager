@@ -11,6 +11,20 @@ let
   module = pkgs.writeText "mount-module" ''
     { pkgs, lib, ... }: {
       programs.rclone.remotes = {
+        alices-smb-remote = {
+          config = {
+            type = "smb";
+            host = "remote";
+            user = "alice";
+          };
+          mounts = {
+            "/home/alice/smb files$" = {
+              enable = true;
+              mountPoint = "/home/alice/smb-files";
+            };
+          };
+        };
+
         alices-sftp-remote = {
           config = {
             type = "sftp";
@@ -91,6 +105,53 @@ in
         status, out = machine.systemctl(f"status {svc_name}", "alice")
         assert status != 0, \
           f"The disabled mount {svc_name} was created"
+
+    with subtest("Mount a remote (smb)"):
+      # https://rclone.org/commands/rclone_mount/#vfs-directory-cache
+      # Sending a SIGHUP evicts every dcache entry
+      def clear_vfs_dcache():
+        svc_name = "rclone-mount:.home.alice.smb_files@alices-smb-remote.service"
+        succeed_as_alice(f"kill -s HUP $(systemctl --user show -p MainPID --value {svc_name})")
+        succeed_as_alice(
+          "sync",
+          "sleep 5",
+          box=remote
+        )
+
+      # remote -> machine
+      succeed_as_alice(
+        "mkdir /home/alice/smb files$",
+        "touch /home/alice/smb files$/test",
+        "echo started > /home/alice/smb files$/log",
+        box=remote
+      )
+
+      succeed_as_alice("ls /home/alice/smb-files/test")
+
+      test_log = succeed_as_alice("cat /home/alice/smb-files/log")
+      expected = "started";
+      assert expected in test_log, \
+        f"Mounted file does not have expected contents. Expected {test_log} to contain \"{expected}\""
+
+      # machine -> remote
+      succeed_as_alice(
+        "touch /home/alice/smb-files/new-file",
+        "echo testing this works both ways! >> /home/alice/smb-files/log",
+      )
+
+      clear_vfs_dcache()
+
+      succeed_as_alice("ls /home/alice/smb-files/new-file", box=remote)
+
+      test_log = succeed_as_alice("cat /home/alice/smb-files/log", box=remote)
+      expected = "testing this works both ways!"
+      assert expected in test_log, \
+        f"Mounted file does not have expected contents. Expected {test_log} to contain \"{expected}\""
+
+      expected = "started"
+      assert expected in test_log, \
+        f"Mounted file does not have expected contents. Expected {test_log} to contain \"{expected}\""
+ 
 
     with subtest("Mount a remote (sftp)"):
       # https://rclone.org/commands/rclone_mount/#vfs-directory-cache
